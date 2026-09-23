@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>离心机转子配平规划器</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<header>
+  <h1>🧪 离心机转子配平规划器</h1>
+  <p class="subtitle">录入槽位角度、试管质量与禁用槽位，搜索近似最优对称布局 · 计算合力矩与二阶不平衡量 · 支持锁定试管增量重排、方案回放与 JSON 导出</p>
+</header>
+
+<main>
+  <!-- ============ 左栏：输入 ============ -->
+  <section class="panel input-panel">
+    <h2>① 转子配置</h2>
+    <div class="form-grid">
+      <label>槽位数量
+        <input type="number" id="nSlots" min="2" max="120" value="12">
+      </label>
+      <label>转子半径 (mm)
+        <input type="number" id="radiusMm" min="1" step="1" value="100">
+      </label>
+      <label>转速 (rpm，可选)
+        <input type="number" id="rpm" min="0" step="100" placeholder="如 5000">
+      </label>
+      <label>角度模式
+        <select id="angleMode">
+          <option value="uniform">均布 (360°/n)</option>
+          <option value="custom">自定义角度</option>
+        </select>
+      </label>
+    </div>
+    <div id="customAnglesWrap" class="hidden">
+      <label>各槽角度（°，逗号分隔，0° 在顶部、顺时针）
+        <input type="text" id="customAngles" placeholder="0,30,60,90,...">
+      </label>
+    </div>
+    <p class="hint">在右侧转子图上<strong>点击空槽可切换禁用/启用</strong>；槽位编号从 0 开始。</p>
+    <div id="disabledInfo" class="chip-row"></div>
+
+    <h2>② 试管清单</h2>
+    <div class="table-wrap">
+      <table id="tubesTable">
+        <thead>
+          <tr>
+            <th>编号</th><th>质量 (g)</th><th>锁定</th><th>锁定槽位</th><th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="btn-row">
+      <button type="button" id="addTube" class="btn">＋ 添加试管</button>
+      <button type="button" id="loadSample" class="btn btn-ghost">载入示例</button>
+    </div>
+
+    <h2>③ 优化参数</h2>
+    <div class="form-grid">
+      <label>一阶权重 w1
+        <input type="number" id="w1" min="0" step="0.05" value="1">
+      </label>
+      <label>二阶权重 w2
+        <input type="number" id="w2" min="0" step="0.05" value="0.15">
+      </label>
+      <label>退火迭代次数
+        <input type="number" id="iterations" min="0" step="1000" placeholder="自动">
+      </label>
+      <label>随机种子
+        <input type="number" id="seed" value="42">
+      </label>
+    </div>
+    <div class="btn-row">
+      <button type="button" id="runBtn" class="btn btn-primary">▶ 计算配平方案</button>
+      <button type="button" id="saveBtn" class="btn" disabled>💾 保存方案</button>
+      <button type="button" id="exportBtn" class="btn" disabled>⬇ 导出 JSON</button>
+    </div>
+    <div id="errorBox" class="error hidden"></div>
+  </section>
+
+  <!-- ============ 右栏：可视化与结果 ============ -->
+  <section class="panel result-panel">
+    <h2>转子布局</h2>
+    <div class="rotor-area">
+      <svg id="rotorSvg" viewBox="0 0 640 640"></svg>
+      <div class="legend">
+        <span class="legend-item"><i class="dot dot-free"></i>空槽</span>
+        <span class="legend-item"><i class="dot dot-tube"></i>试管</span>
+        <span class="legend-item"><i class="dot dot-locked"></i>锁定</span>
+        <span class="legend-item"><i class="dot dot-disabled"></i>禁用</span>
+        <span class="legend-item"><i class="arrow arrow-u1"></i>一阶 U1</span>
+        <span class="legend-item"><i class="arrow arrow-u2"></i>二阶 U2</span>
+      </div>
+    </div>
+
+    <div id="metricsWrap" class="hidden">
+      <h2>计算结果</h2>
+      <div id="metricCards" class="metric-cards"></div>
+      <div id="gradeBanner" class="grade-banner"></div>
+    </div>
+
+    <div id="replayWrap" class="hidden">
+      <h2>方案回放</h2>
+      <div class="replay-controls">
+        <button class="btn btn-sm" id="stepFirst">⏮</button>
+        <button class="btn btn-sm" id="stepPrev">◀</button>
+        <button class="btn btn-sm btn-primary" id="stepPlay">▶ 播放</button>
+        <button class="btn btn-sm" id="stepNext">▶</button>
+        <button class="btn btn-sm" id="stepLast">⏭</button>
+        <span id="stepPos" class="step-pos"></span>
+      </div>
+      <div id="stepMeta" class="step-meta"></div>
+      <div class="step-scroll"><ol id="stepList"></ol></div>
+    </div>
+
+    <div id="pairsWrap" class="hidden">
+      <h2>配对依据解释</h2>
+      <div id="pairList"></div>
+    </div>
+
+    <h2>历史方案</h2>
+    <div class="table-wrap">
+      <table id="plansTable">
+        <thead><tr><th>#</th><th>名称</th><th>槽/管</th><th>U1 (g·mm)</th><th>等级</th><th>操作</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<footer>
+  FastAPI + SQLite · 算法：贪心构造 → 模拟退火（仅移动未锁定试管）→ 邻域爬山
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

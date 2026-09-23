@@ -1,0 +1,20 @@
+services:
+  balancer:
+    build: .
+    image: centrifuge-balancer:latest
+    container_name: centrifuge-balancer
+    ports:
+      # 宿主机端口:容器端口；如 8000 被占用，改左侧即可
+      - "${HOST_PORT:-8000}:8000"
+    environment:
+      # SQLite 数据库文件路径（容器内）
+      BALANCER_DB: /data/balancer.db
+      # 可在此调整 uvicorn 日志级别
+      UVICORN_LOG_LEVEL: info
+    volumes:
+      # 方案与转子配置持久化到命名卷
+      - balancer-data:/data
+    restart: unless-stopped
+
+volumes:
+  balancer-data:
